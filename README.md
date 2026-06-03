@@ -1,8 +1,8 @@
-A7670E GSM Module with ESP32 DevKit
+# A7670E GSM Module with ESP32 DevKit
 
 This guide shows how to connect and use the A7670E GSM/LTE module with an ESP32 DevKit.
 
-Hardware Connections
+## Hardware Connections
 
 Power Connections
 
@@ -25,7 +25,7 @@ RXD| TX2 (GPIO17)
 - Use a stable 5V power supply capable of providing at least 2A peak current.»
 
 ESP32 Example Code
-
+```cpp
 #define MODEM_RX 16
 #define MODEM_TX 17
 
@@ -49,7 +49,9 @@ void loop() {
   }
 }
 
-Serial Monitor Settings
+```
+
+## Serial Monitor Settings
 
 Baud Rate: 115200
 Line Ending: Both NL & CR
