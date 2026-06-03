@@ -1,15 +1,27 @@
 #include <Arduino.h>
 
 // Macro for receiver phone number
-#define RECEIVER_NUMBER "+639632146348" // Replace with your target number
+#define RECEIVER_NUMBER "+639632146348"
 
 // Water level thresholds in CM
-#define ZERO_WATER_LEVEL_CM 50.0 // Distance when water starts (calibrate this)
-#define FOOT_LEVEL_CM 30.0       // Up to 30cm = Foot level
-#define KNEE_LEVEL_CM 45.0       // 31-45cm = Knee level
-#define LEG_LEVEL_CM 60.0        // 46-60cm = Leg level
-#define WAIST_LEVEL_CM 100.0     // 61-100cm = Waist level
-#define SHOULDER_LEVEL_CM 150.0  // 101-150cm = Shoulder level
+#define ZERO_WATER_LEVEL_CM 50.0
+#define FOOT_LEVEL_CM 30.0
+#define KNEE_LEVEL_CM 45.0
+#define LEG_LEVEL_CM 60.0
+#define WAIST_LEVEL_CM 100.0
+#define SHOULDER_LEVEL_CM 150.0
+
+void clearBuffer()
+{
+  unsigned long start = millis();
+  while (millis() - start < 500)
+  {
+    while (Serial2.available())
+    {
+      Serial2.read();
+    }
+  }
+}
 
 // Water Level Enum
 enum WaterLevel
@@ -23,12 +35,11 @@ enum WaterLevel
   DANGER_LEVEL
 };
 
-// Variables for water level detection
-float zeroWaterLevelDistanceCm = ZERO_WATER_LEVEL_CM; // Calibration point
-float measuredDistanceCm = 0.0;                       // Distance from sensor to water
-float waterLevelCm = 0.0;                             // Calculated water height
+// Variables
+float zeroWaterLevelDistanceCm = ZERO_WATER_LEVEL_CM;
+float measuredDistanceCm = 0.0;
+float waterLevelCm = 0.0;
 
-// Function to get water level string from enum
 const char *getWaterLevelString(WaterLevel level)
 {
   switch (level)
@@ -52,50 +63,22 @@ const char *getWaterLevelString(WaterLevel level)
   }
 }
 
-// Function to determine water level based on measured distance
 WaterLevel calculateWaterLevel(float distance)
 {
   waterLevelCm = zeroWaterLevelDistanceCm - distance;
-
   if (waterLevelCm <= 0)
-  {
     return NO_WATER;
-  }
-  else if (waterLevelCm <= FOOT_LEVEL_CM)
-  {
+  if (waterLevelCm <= FOOT_LEVEL_CM)
     return FOOT_LEVEL;
-  }
-  else if (waterLevelCm <= KNEE_LEVEL_CM)
-  {
+  if (waterLevelCm <= KNEE_LEVEL_CM)
     return KNEE_LEVEL;
-  }
-  else if (waterLevelCm <= LEG_LEVEL_CM)
-  {
+  if (waterLevelCm <= LEG_LEVEL_CM)
     return LEG_LEVEL;
-  }
-  else if (waterLevelCm <= WAIST_LEVEL_CM)
-  {
+  if (waterLevelCm <= WAIST_LEVEL_CM)
     return WAIST_LEVEL;
-  }
-  else if (waterLevelCm <= SHOULDER_LEVEL_CM)
-  {
+  if (waterLevelCm <= SHOULDER_LEVEL_CM)
     return SHOULDER_LEVEL;
-  }
-  else
-  {
-    return DANGER_LEVEL;
-  }
-}
-
-// Function to create SMS message with actual values
-String createSMSMessage(float measuredDistance, float waterHeight, WaterLevel level)
-{
-  String message = "AGOS HERO: ";
-  message += String(getWaterLevelString(level));
-  message += " LEVEL (";
-  message += String(waterHeight, 1);
-  message += "cm) FLOOD IS DETECTED AT STATION";
-  return message;
+  return DANGER_LEVEL;
 }
 
 void sendSMS(String phoneNumber, String message)
@@ -106,12 +89,15 @@ void sendSMS(String phoneNumber, String message)
   Serial.print("Msg: ");
   Serial.println(message);
 
+  // Disable command echo
+  Serial2.println("ATE0");
+  delay(500);
+  clearBuffer();
+
   // Set SMS text mode
   Serial2.println("AT+CMGF=1");
-  delay(1000);
-  // Clear any response
-  while (Serial2.available())
-    Serial2.read();
+  delay(500);
+  clearBuffer();
 
   // Send command with phone number
   Serial2.print("AT+CMGS=\"");
@@ -119,17 +105,21 @@ void sendSMS(String phoneNumber, String message)
   Serial2.println("\"");
   delay(1000);
 
-  // Clear the '>' prompt from buffer
-  while (Serial2.available())
-    Serial2.read();
+  // Clear the '>' prompt and any echoes
+  clearBuffer();
 
-  // Send ONLY the message (no AT commands)
-  Serial2.println(message); // Use println to add newline
+  // Send ONLY the message
+  Serial2.print(message);
   delay(500);
 
   // Send Ctrl+Z (0x1A) to transmit
   Serial2.write(0x1A);
   delay(5000);
+
+  // Re-enable echo for terminal use (optional)
+  Serial2.println("ATE1");
+  delay(500);
+  clearBuffer();
 
   Serial.println("✅ SMS sent!");
 }
@@ -143,53 +133,57 @@ void setup()
   Serial.println("AGOS HERO - Flood Monitoring System");
   Serial.println("===================================");
 
-  // Simulate water level detection (replace with actual sensor reading)
-  Serial.println("\n--- Simulating Water Level Detection ---");
+  // Disable echo globally
+  Serial2.println("ATE0");
+  delay(500);
+  clearBuffer();
 
-  // Example 1: Simulate FOOT level
-  Serial.println("\nTest 1: Simulating FOOT level flood");
-  measuredDistanceCm = 35.0; // Distance to water surface (cm)
+  // Test 1: FOOT level
+  Serial.println("\n--- Test 1: FOOT level flood ---");
+  measuredDistanceCm = 35.0;
   waterLevelCm = zeroWaterLevelDistanceCm - measuredDistanceCm;
   WaterLevel currentLevel = calculateWaterLevel(measuredDistanceCm);
 
-  Serial.print("Measured Distance: ");
-  Serial.print(measuredDistanceCm);
-  Serial.println(" cm");
-  Serial.print("Calculated Water Level: ");
+  Serial.print("Water Level: ");
   Serial.print(waterLevelCm);
   Serial.println(" cm");
-  Serial.print("Alert Level: ");
+  Serial.print("Alert: ");
   Serial.println(getWaterLevelString(currentLevel));
 
-  // Create and send SMS
-  String smsMessage = createSMSMessage(measuredDistanceCm, waterLevelCm, currentLevel);
+  String smsMessage = "AGOS HERO: ";
+  smsMessage += getWaterLevelString(currentLevel);
+  smsMessage += " LEVEL (";
+  smsMessage += String(waterLevelCm, 1);
+  smsMessage += "cm) FLOOD IS DETECTED AT STATION";
+
   delay(2000);
   sendSMS(RECEIVER_NUMBER, smsMessage);
 
-  delay(3000);
+  delay(5000);
 
-  // Example 2: Simulate WAIST level
-  Serial.println("\n--- Test 2: Simulating WAIST level flood ---");
-  measuredDistanceCm = 10.0; // Distance to water surface (cm)
+  // Test 2: KNEE level
+  Serial.println("\n--- Test 2: KNEE level flood ---");
+  measuredDistanceCm = 10.0;
   waterLevelCm = zeroWaterLevelDistanceCm - measuredDistanceCm;
   currentLevel = calculateWaterLevel(measuredDistanceCm);
 
-  Serial.print("Measured Distance: ");
-  Serial.print(measuredDistanceCm);
-  Serial.println(" cm");
-  Serial.print("Calculated Water Level: ");
+  Serial.print("Water Level: ");
   Serial.print(waterLevelCm);
   Serial.println(" cm");
-  Serial.print("Alert Level: ");
+  Serial.print("Alert: ");
   Serial.println(getWaterLevelString(currentLevel));
 
-  // Create and send second SMS
-  smsMessage = createSMSMessage(measuredDistanceCm, waterLevelCm, currentLevel);
+  smsMessage = "AGOS HERO: ";
+  smsMessage += getWaterLevelString(currentLevel);
+  smsMessage += " LEVEL (";
+  smsMessage += String(waterLevelCm, 1);
+  smsMessage += "cm) FLOOD IS DETECTED AT STATION";
+
   delay(2000);
   sendSMS(RECEIVER_NUMBER, smsMessage);
 
   Serial.println("\n===================================");
-  Serial.println("SIM Terminal Ready for AT commands:");
+  Serial.println("Ready for commands (echo disabled)");
 }
 
 void loop()
