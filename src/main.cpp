@@ -1,4 +1,12 @@
 #include <Arduino.h>
+#include "Relay.h"
+
+#define ALARM_RELAY_PIN 4
+#define SONAR_TRIG_PIN 19
+#define SOLAR_ECHO_PIN 18
+const char *ALARM_RELAY_NAME = "ALARM";
+
+Relay Alarm(ALARM_RELAY_PIN, ALARM_RELAY_NAME, true);
 
 // Macro for receiver phone number
 #define RECEIVER_NUMBER "+639632146348"
@@ -10,18 +18,6 @@
 #define LEG_LEVEL_CM 60.0
 #define WAIST_LEVEL_CM 100.0
 #define SHOULDER_LEVEL_CM 150.0
-
-void clearBuffer()
-{
-  unsigned long start = millis();
-  while (millis() - start < 500)
-  {
-    while (Serial2.available())
-    {
-      Serial2.read();
-    }
-  }
-}
 
 // Water Level Enum
 enum WaterLevel
@@ -35,11 +31,34 @@ enum WaterLevel
   DANGER_LEVEL
 };
 
+// Structure to hold flood data
+struct FloodData
+{
+  float measuredDistanceCm;
+  float waterLevelCm;
+  WaterLevel level;
+  String location;
+};
+
 // Variables
 float zeroWaterLevelDistanceCm = ZERO_WATER_LEVEL_CM;
 float measuredDistanceCm = 0.0;
 float waterLevelCm = 0.0;
 
+// ========== BUFFER FUNCTIONS ==========
+void clearBuffer()
+{
+  unsigned long start = millis();
+  while (millis() - start < 500)
+  {
+    while (Serial2.available())
+    {
+      Serial2.read();
+    }
+  }
+}
+
+// ========== WATER LEVEL FUNCTIONS ==========
 const char *getWaterLevelString(WaterLevel level)
 {
   switch (level)
@@ -81,14 +100,42 @@ WaterLevel calculateWaterLevel(float distance)
   return DANGER_LEVEL;
 }
 
-void sendSMS(String phoneNumber, String message)
+// ========== SMS MESSAGE CREATION FUNCTIONS ==========
+String createSMSMessage(WaterLevel level, float waterHeight)
 {
-  Serial.println("\n📱 Sending SMS...");
-  Serial.print("To: ");
-  Serial.println(phoneNumber);
-  Serial.print("Msg: ");
-  Serial.println(message);
+  String message = "AGOS HERO: ";
+  message += getWaterLevelString(level);
+  message += " LEVEL (";
+  message += String(waterHeight, 1);
+  message += "cm) FLOOD IS DETECTED AT STATION";
+  return message;
+}
 
+String createSMSMessageWithLocation(WaterLevel level, float waterHeight, String location)
+{
+  String message = "AGOS HERO: ";
+  message += getWaterLevelString(level);
+  message += " LEVEL (";
+  message += String(waterHeight, 1);
+  message += "cm) FLOOD IS DETECTED AT ";
+  message += location;
+  return message;
+}
+
+String createSMSMessageCustom(String prefix, WaterLevel level, float waterHeight, String suffix)
+{
+  String message = prefix;
+  message += getWaterLevelString(level);
+  message += " (";
+  message += String(waterHeight, 1);
+  message += "cm) ";
+  message += suffix;
+  return message;
+}
+
+// ========== SMS SENDING FUNCTIONS ==========
+void initSMS()
+{
   // Disable command echo
   Serial2.println("ATE0");
   delay(500);
@@ -98,6 +145,15 @@ void sendSMS(String phoneNumber, String message)
   Serial2.println("AT+CMGF=1");
   delay(500);
   clearBuffer();
+}
+
+void sendSMS(String phoneNumber, String message)
+{
+  Serial.println("\n📱 Sending SMS...");
+  Serial.print("To: ");
+  Serial.println(phoneNumber);
+  Serial.print("Msg: ");
+  Serial.println(message);
 
   // Send command with phone number
   Serial2.print("AT+CMGS=\"");
@@ -116,31 +172,89 @@ void sendSMS(String phoneNumber, String message)
   Serial2.write(0x1A);
   delay(5000);
 
-  // Re-enable echo for terminal use (optional)
-  Serial2.println("ATE1");
+  Serial.println("✅ SMS sent!");
+}
+
+void sendSMSWithDeliveryReport(String phoneNumber, String message)
+{
+  Serial.println("\n📱 Sending SMS with delivery report...");
+  Serial.print("To: ");
+  Serial.println(phoneNumber);
+  Serial.print("Msg: ");
+  Serial.println(message);
+
+  // Enable delivery report
+  Serial2.println("AT+CNMI=2,1,0,1,0");
   delay(500);
   clearBuffer();
+
+  // Send command with phone number
+  Serial2.print("AT+CMGS=\"");
+  Serial2.print(phoneNumber);
+  Serial2.println("\"");
+  delay(1000);
+
+  clearBuffer();
+
+  // Send message
+  Serial2.print(message);
+  delay(500);
+  Serial2.write(0x1A);
+  delay(5000);
 
   Serial.println("✅ SMS sent!");
 }
 
-void setup()
+// ========== FLOOD ALERT FUNCTIONS ==========
+void sendFloodAlert(String phoneNumber, float measuredDistance, String location)
 {
-  Serial.begin(115200);
-  Serial2.begin(115200);
-  delay(1000);
+  // Calculate water level
+  WaterLevel level = calculateWaterLevel(measuredDistance);
+  float waterHeight = zeroWaterLevelDistanceCm - measuredDistance;
 
-  Serial.println("AGOS HERO - Flood Monitoring System");
-  Serial.println("===================================");
+  // Create message
+  String message = createSMSMessageWithLocation(level, waterHeight, location);
 
-  // Disable echo globally
-  Serial2.println("ATE0");
-  delay(500);
-  clearBuffer();
+  // Send alert
+  sendSMS(phoneNumber, message);
 
-  // Test 1: FOOT level
-  Serial.println("\n--- Test 1: FOOT level flood ---");
-  measuredDistanceCm = 35.0;
+  // Print to serial
+  Serial.println("🚨 FLOOD ALERT SENT!");
+  Serial.print("   Level: ");
+  Serial.println(getWaterLevelString(level));
+  Serial.print("   Height: ");
+  Serial.print(waterHeight);
+  Serial.println(" cm");
+}
+
+void sendFloodAlertBatch(String phoneNumber, FloodData floodData[], int count)
+{
+  String combinedMessage = "AGOS HERO ALERTS: ";
+
+  for (int i = 0; i < count; i++)
+  {
+    combinedMessage += getWaterLevelString(floodData[i].level);
+    combinedMessage += "(";
+    combinedMessage += String(floodData[i].waterLevelCm, 1);
+    combinedMessage += "cm)@" + floodData[i].location;
+    if (i < count - 1)
+      combinedMessage += ", ";
+  }
+
+  // Truncate if too long (SMS max 160 chars)
+  if (combinedMessage.length() > 160)
+  {
+    combinedMessage = combinedMessage.substring(0, 157) + "...";
+  }
+
+  sendSMS(phoneNumber, combinedMessage);
+}
+
+// ========== TEST FUNCTIONS ==========
+void testFloodAlert(float distance, String levelName)
+{
+  Serial.println("\n--- Test: " + levelName + " level flood ---");
+  measuredDistanceCm = distance;
   waterLevelCm = zeroWaterLevelDistanceCm - measuredDistanceCm;
   WaterLevel currentLevel = calculateWaterLevel(measuredDistanceCm);
 
@@ -150,42 +264,65 @@ void setup()
   Serial.print("Alert: ");
   Serial.println(getWaterLevelString(currentLevel));
 
-  String smsMessage = "AGOS HERO: ";
-  smsMessage += getWaterLevelString(currentLevel);
-  smsMessage += " LEVEL (";
-  smsMessage += String(waterLevelCm, 1);
-  smsMessage += "cm) FLOOD IS DETECTED AT STATION";
-
-  delay(2000);
+  String smsMessage = createSMSMessage(currentLevel, waterLevelCm);
   sendSMS(RECEIVER_NUMBER, smsMessage);
-
-  delay(5000);
-
-  // Test 2: KNEE level
-  Serial.println("\n--- Test 2: KNEE level flood ---");
-  measuredDistanceCm = 10.0;
-  waterLevelCm = zeroWaterLevelDistanceCm - measuredDistanceCm;
-  currentLevel = calculateWaterLevel(measuredDistanceCm);
-
-  Serial.print("Water Level: ");
-  Serial.print(waterLevelCm);
-  Serial.println(" cm");
-  Serial.print("Alert: ");
-  Serial.println(getWaterLevelString(currentLevel));
-
-  smsMessage = "AGOS HERO: ";
-  smsMessage += getWaterLevelString(currentLevel);
-  smsMessage += " LEVEL (";
-  smsMessage += String(waterLevelCm, 1);
-  smsMessage += "cm) FLOOD IS DETECTED AT STATION";
-
-  delay(2000);
-  sendSMS(RECEIVER_NUMBER, smsMessage);
-
-  Serial.println("\n===================================");
-  Serial.println("Ready for commands (echo disabled)");
 }
 
+void runAllTests()
+{
+  testFloodAlert(35.0, "FOOT");
+  delay(5000);
+  testFloodAlert(25.0, "LEG");
+  delay(5000);
+  testFloodAlert(10.0, "KNEE");
+  delay(5000);
+  testFloodAlert(-10.0, "WAIST");
+  delay(5000);
+  testFloodAlert(-30.0, "SHOULDER");
+}
+
+// ========== SETUP ==========
+void setup()
+{
+  Serial.begin(115200);
+  Serial2.begin(115200);
+  delay(1000);
+  Alarm.begin();
+
+  Serial.println("AGOS HERO - Flood Monitoring System");
+  Serial.println("===================================");
+
+  // Initialize SMS module
+  initSMS();
+
+  // // Test 1: FOOT level
+  // testFloodAlert(35.0, "FOOT");
+
+  // delay(5000);
+
+  // // Test 2: KNEE level
+  // testFloodAlert(10.0, "KNEE");
+
+  // // Example with location
+  // Serial.println("\n--- Example with Location ---");
+  // float sampleDistance = 35.0;
+  // WaterLevel sampleLevel = calculateWaterLevel(sampleDistance);
+  // float sampleHeight = zeroWaterLevelDistanceCm - sampleDistance;
+  // String locationMessage = createSMSMessageWithLocation(sampleLevel, sampleHeight, "BARANGAY HALL");
+  // sendSMS(RECEIVER_NUMBER, locationMessage);
+
+  // // Example batch alert
+  // Serial.println("\n--- Example Batch Alert ---");
+  // FloodData alerts[2];
+  // alerts[0] = {35.0, 15.0, FOOT_LEVEL, "SITE A"};
+  // alerts[1] = {10.0, 40.0, KNEE_LEVEL, "SITE B"};
+  // sendFloodAlertBatch(RECEIVER_NUMBER, alerts, 2);
+
+  // Serial.println("\n===================================");
+  // Serial.println("Ready for commands (echo disabled)");
+}
+
+// ========== LOOP ==========
 void loop()
 {
   // USB Serial → Serial2 (send to SIM module)
@@ -202,4 +339,11 @@ void loop()
     char c = Serial2.read();
     Serial.print(c);
   }
+
+  Serial.println("RELAY ON");
+  Alarm.on();
+  delay(3000);
+  Serial.println("RELAY OFF");
+  Alarm.off();
+  delay(3000);
 }
