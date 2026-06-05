@@ -1,12 +1,14 @@
 #include <Arduino.h>
 #include "Relay.h"
+#include "Sonar.h"
 
 #define ALARM_RELAY_PIN 4
 #define SONAR_TRIG_PIN 19
-#define SOLAR_ECHO_PIN 18
+#define SONAR_ECHO_PIN 18
 const char *ALARM_RELAY_NAME = "ALARM";
 
 Relay Alarm(ALARM_RELAY_PIN, ALARM_RELAY_NAME, true);
+Sonar FloodSensor(SONAR_TRIG_PIN, SONAR_ECHO_PIN);
 
 // Macro for receiver phone number
 #define RECEIVER_NUMBER "+639632146348"
@@ -175,6 +177,70 @@ void sendSMS(String phoneNumber, String message)
   Serial.println("✅ SMS sent!");
 }
 
+void saveAndSendSms(String phoneNumber, String message)
+{
+  Serial.println("\n💾 Saving and Sending SMS...");
+  Serial.print("To: ");
+  Serial.println(phoneNumber);
+  Serial.print("Msg: ");
+  Serial.println(message);
+
+  // Step 1: Save message to SIM storage
+  Serial2.print("AT+CMGW=\"");
+  Serial2.print(phoneNumber);
+  Serial2.println("\"");
+  delay(1000);
+
+  // Clear the '>' prompt and any echoes
+  clearBuffer();
+
+  // Write the message
+  Serial2.print(message);
+  delay(500);
+
+  // Send Ctrl+Z to save
+  Serial2.write(0x1A);
+  delay(3000);
+
+  // Read response to get message index
+  String response = "";
+  while (Serial2.available())
+  {
+    char c = Serial2.read();
+    response += c;
+    Serial.print(c);
+  }
+
+  // Extract index from +CMGW: <index>
+  int msgIndex = -1;
+  int startIdx = response.indexOf("+CMGW: ");
+  if (startIdx != -1)
+  {
+    msgIndex = response.substring(startIdx + 7).toInt();
+    Serial.print("\n📝 Message saved at index: ");
+    Serial.println(msgIndex);
+  }
+  else
+  {
+    Serial.println("\n❌ Failed to save message");
+    return;
+  }
+
+  // Step 2: Send the saved message
+  delay(500);
+  Serial2.print("AT+CMSS=");
+  Serial2.println(msgIndex);
+  delay(5000);
+
+  // Read final response
+  while (Serial2.available())
+  {
+    Serial.write(Serial2.read());
+  }
+
+  Serial.println("✅ SMS saved and sent!");
+}
+
 void sendSMSWithDeliveryReport(String phoneNumber, String message)
 {
   Serial.println("\n📱 Sending SMS with delivery report...");
@@ -288,6 +354,10 @@ void setup()
   Serial2.begin(115200);
   delay(1000);
   Alarm.begin();
+  // FloodSensor.begin();
+
+  pinMode(SONAR_TRIG_PIN, OUTPUT);
+  pinMode(SONAR_ECHO_PIN, INPUT);
 
   Serial.println("AGOS HERO - Flood Monitoring System");
   Serial.println("===================================");
@@ -295,7 +365,7 @@ void setup()
   // Initialize SMS module
   initSMS();
 
-  // // Test 1: FOOT level
+  // Test 1: FOOT level
   // testFloodAlert(35.0, "FOOT");
 
   // delay(5000);
@@ -320,11 +390,14 @@ void setup()
 
   // Serial.println("\n===================================");
   // Serial.println("Ready for commands (echo disabled)");
+
+  saveAndSendSms(RECEIVER_NUMBER, "hello");
 }
 
 // ========== LOOP ==========
 void loop()
 {
+  return;
   // USB Serial → Serial2 (send to SIM module)
   if (Serial.available() > 0)
   {
@@ -340,10 +413,28 @@ void loop()
     Serial.print(c);
   }
 
-  Serial.println("RELAY ON");
-  Alarm.on();
-  delay(3000);
-  Serial.println("RELAY OFF");
-  Alarm.off();
-  delay(3000);
+  digitalWrite(SONAR_TRIG_PIN, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(SONAR_TRIG_PIN, HIGH); // turn on the Trigger to generate pulse
+  delayMicroseconds(20);              // keep the trigger "ON" for 10 ms to generate pulse
+  digitalWrite(SONAR_TRIG_PIN, LOW);  // Turn off the pulse trigger to stop pulse
+
+  // If pulse reached the receiver SONAR_ECHO_PIN
+  // become high Then pulseIn() returns the
+  // time taken by the pulse to reach the receiver
+  long duration = pulseIn(SONAR_ECHO_PIN, HIGH);
+  int distance = (duration / 2) * 0.0342;
+
+  Serial.print("Distance: ");
+  Serial.print(distance);
+  Serial.println(" cm");
+  delay(1000);
+
+  // Serial.println("RELAY ON");
+  // Alarm.on();
+  // delay(3000);
+  // Serial.println("RELAY OFF");
+  // Alarm.off();
+  // delay(3000);
 }
