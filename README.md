@@ -67,9 +67,6 @@ Overall, the circuit combines solar power generation, battery energy storage, LT
 | `AT+CMGD=1,4`             | **Delete All SMS Messages**<br><br>Deletes all SMS messages stored in SIM memory.<br><br>**Response:**<br>`OK`                                                                                                                       |
 
 ---
-You can add this section after the **Discussion of the Circuit** section as **Physical Design and Mechanical Structure**:
-
----
 
 ## PHYSICAL DESIGN AND MECHANICAL STRUCTURE
 
@@ -146,11 +143,8 @@ WATER LEVEL:
 130.0 cm
 
 IMMEDIATE EVACUATION MAY BE REQUIRED.
+
 ```
-
-## You can add this section after **AT Commands Used by the System** or before the SMS Command section
-
----
 
 ## FUNDAMENTAL PROGRAMMING PRINCIPLES USED
 
