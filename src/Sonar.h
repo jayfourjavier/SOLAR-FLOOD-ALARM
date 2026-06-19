@@ -28,7 +28,7 @@ private:
         digitalWrite(trigPin, LOW);
         delayMicroseconds(2);
         digitalWrite(trigPin, HIGH);
-        delayMicroseconds(10);
+        delayMicroseconds(20);
         digitalWrite(trigPin, LOW);
     }
 
@@ -61,11 +61,11 @@ public:
      * @param timeout Pulse timeout in microseconds (default: 30000 = 5m range)
      * @param medianSize Number of samples for median filter (default: 5)
      */
-    Sonar(int trig, int echo, unsigned long timeout = 30000, int medianSize = 5)
+    Sonar(int trig, int echo, int medianSize = 5)
     {
         trigPin = trig;
         echoPin = echo;
-        timeoutUs = timeout;
+        timeoutUs = 30000;
         medianFilterSize = medianSize;
     }
 
