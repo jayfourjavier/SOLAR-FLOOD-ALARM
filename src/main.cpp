@@ -4,26 +4,29 @@
 #include "Sonar.h"
 #include "Sim7670e.h"
 
-#define PROJECT_NAME "SOLAR FLOOD ALARM"
-#define SECURITY_CODE "147963"
+#define PROJECT_NAME "SOLAR FLOOD ALARM" // YOU CAN MODIFY PROJECT NAME HERE, THIS WILL BE INCLUDED IN SMS TO BE SENT IN THE ALERTS
+#define SECURITY_CODE "147963"           // THIS IS THE HARDCODED SECURITY CODE FOR SETTING UP THE DEVICE
 #define HELP_SMS_GUIDE                           \
   "SOLAR FLOOD ALERT COMMANDS:\n"                \
   "[SECURITY_CODE,SETUP_HELP,HELP]\n"            \
   "[SECURITY_CODE,SETUP_SENSOR,ZERO]\n"          \
   "[SECURITY_CODE,SETUP_NUMBER,+639XXXXXXXXX]\n" \
-  "[SECURITY_CODE,GET_SENSOR_DATA,DATA]"
-#define SETUP_SMS_MESSAGE "SETUP TEST MESSAGE JAYFOUR JAVIER"
+  "[SECURITY_CODE,GET_SENSOR_DATA,DATA]"                      // THIS IS THE HELP GUIDE TO BE SENT WHEN SMS HELP COMMAND IS RECEIVED
+#define SETUP_SMS_MESSAGE "SETUP TEST MESSAGE JAYFOUR JAVIER" // THIS IS THE SMS MESSAGE TO BE SENT BY THE PROTYPE TO THE RECEIVER NUMBER UPON STARTUP OR BOOTING
 
 #define FLASH_SIZE 128
 #define FLASH_MAGIC_ADDR 0
-#define FLASH_MAGIC_VALUE 0x14826301
+#define FLASH_MAGIC_VALUE 0x14826201
 #define FLASH_ZERO_DISTANCE_ADDR 10
-#define FLASH_DEFAULT_ZERO_DISTANCE 300.00f
+#define FLASH_DEFAULT_ZERO_DISTANCE 200.00f
 #define FLASH_RECEIVER_ADDR 20
-#define FLASH_RECEIVER_SIZE 16
+#define FLASH_RECEIVER_SIZE 20
 #define FLASH_DEFAULT_RECEIVER_NUMBER "+639632146348"
 
-#define FLASH_INITIALIZED_VALUE 0x01
+#define SENSOR_READING_INTERVAL 5000UL // read every 5 seconds
+#define MIN_VALID_DISTANCE_CM 25.0f
+#define MAX_VALID_DISTANCE_CM 450.0f
+#define FLOOD_STATE_VALIDATION_COUNT 3
 
 enum CommandType
 {
@@ -45,10 +48,8 @@ enum FloodState
 
 FloodState currentFloodState = STATE_NORMAL;
 
-#define LEVEL1_ALARM_DURATION 10000UL // 10 seconds
-#define LEVEL4_CONTINUOUS_ALARM true
-
 // ACTUAL DURATION AND INTERVAL. NOTE: 1 MINUTE = 60000, 1 SECOND = 1000. UL MEANS UNSIGNED LONG.
+// #define LEVEL1_ALARM_DURATION 10000UL // 10 seconds
 // #define LEVEL1_ALARM_INTERVAL 600000UL // 10 minutes
 // #define LEVEL2_ALARM_DURATION 30000UL   // 30 seconds
 // #define LEVEL2_ALARM_INTERVAL 300000UL // 5 minutes
@@ -579,7 +580,6 @@ void inboxController()
 
       Serial.print("COMMAND TYPE ENUM: ");
       Serial.println(command.type);
-
       Serial.print("COMMAND CONTENT: ");
       Serial.println(command.content);
       Serial.println("");
@@ -590,7 +590,6 @@ void inboxController()
     {
       Serial.println("INCORRECT SECURITY CODE");
     }
-
     Serial.println("=============================================");
   }
 }
@@ -599,7 +598,6 @@ void alarmController()
 {
   static unsigned long previousMillis = 0;
   static bool alarmState = false;
-
   unsigned long currentMillis = millis();
 
   if (currentFloodState == STATE_NORMAL)
@@ -609,7 +607,6 @@ void alarmController()
       Alarm.off();
       alarmState = false;
     }
-
     return;
   }
 
@@ -623,7 +620,6 @@ void alarmController()
 
       Serial.println("LEVEL 4: CONTINUOUS ALARM");
     }
-
     return;
   }
 
@@ -738,6 +734,72 @@ void smsAlertController()
   }
 }
 
+void floodSensorController()
+{
+  static unsigned long previousMillis = 0;
+  static FloodState pendingState = STATE_NORMAL;
+  static uint8_t validationCount = 0;
+
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousMillis < SENSOR_READING_INTERVAL)
+  {
+    return;
+  }
+
+  previousMillis = currentMillis;
+
+  // Read sensor
+  float distance = FloodSensor.getMedianDistance();
+
+  // Validate reading
+  if (distance < MIN_VALID_DISTANCE_CM || distance > MAX_VALID_DISTANCE_CM)
+  {
+    Serial.printf("INVALID SENSOR READING: %.2f cm\n", distance);
+    return;
+  }
+  measuredDistanceCm = distance;
+  // Calculate water level
+  waterLevelCm = zeroWaterLevelDistanceCm - measuredDistanceCm;
+
+  if (waterLevelCm < 0)
+  {
+    waterLevelCm = 0;
+  }
+
+  FloodState calculatedState = calculateFloodState(waterLevelCm);
+
+  Serial.println("----------------------------------");
+  Serial.printf("DISTANCE     : %.1f cm\n", measuredDistanceCm);
+  Serial.printf("WATER HEIGHT : %.1f cm\n", waterLevelCm);
+  Serial.printf("STATE        : %s\n",
+                getFloodStateName(calculatedState));
+
+  // State validation / debounce
+  if (calculatedState == currentFloodState)
+  {
+    validationCount = 0;
+    pendingState = calculatedState;
+    return;
+  }
+
+  if (calculatedState != pendingState)
+  {
+    pendingState = calculatedState;
+    validationCount = 1;
+    return;
+  }
+
+  validationCount++;
+
+  if (validationCount >= FLOOD_STATE_VALIDATION_COUNT)
+  {
+    Serial.printf("STATE CHANGED: %s -> %s\n", getFloodStateName(currentFloodState), getFloodStateName(calculatedState));
+    currentFloodState = calculatedState;
+    validationCount = 0;
+  }
+}
+
 // ========== SETUP ==========
 void setup()
 {
@@ -779,9 +841,12 @@ void setup()
 // ========== LOOP ==========
 void loop()
 {
-
   Sim.update();
+  floodSensorController();
   inboxController();
   alarmController();
   smsAlertController();
+
+  // Serial.println(FloodSensor.getMedianDistance());
+  // delay(1000);
 }
